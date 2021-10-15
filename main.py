@@ -1,54 +1,95 @@
 import discord
-from discord.ext import commands
-import datetime
+import os
+import requests
+import json
+import random
+from replit import db
+from keep_alive import keep_alive
 
-from urllib import parse, request
-import re
+client = discord.Client()
 
-bot = commands.Bot(command_prefix='>', description="This is a Helper Bot")
+sad_words = ["sad", "depressed", "unhappy", "angry", "miserable"]
 
-@bot.command()
-async def ping(ctx):
-    await ctx.send('pong')
+starter_encouragements = [
+  "Cheer up!",
+  "Hang in there.",
+  "You are a great person / bot!"
+]
 
-@bot.command()
-async def sum(ctx, numOne: int, numTwo: int):
-    await ctx.send(numOne + numTwo)
+if "responding" not in db.keys():
+  db["responding"] = True
 
-@bot.command()
-async def info(ctx):
-    embed = discord.Embed(title=f"{ctx.guild.name}", description="Lorem Ipsum asdasd", timestamp=datetime.datetime.utcnow(), color=discord.Color.blue())
-    embed.add_field(name="Server created at", value=f"{ctx.guild.created_at}")
-    embed.add_field(name="Server Owner", value=f"{ctx.guild.owner}")
-    embed.add_field(name="Server Region", value=f"{ctx.guild.region}")
-    embed.add_field(name="Server ID", value=f"{ctx.guild.id}")
-    # embed.set_thumbnail(url=f"{ctx.guild.icon}")
-    embed.set_thumbnail(url="https://pluralsight.imgix.net/paths/python-7be70baaac.png")
+def get_quote():
+  response = requests.get("https://zenquotes.io/api/random")
+  json_data = json.loads(response.text)
+  quote = json_data[0]["q"] + " -" + json_data[0]["a"]
+  return(quote)
 
-    await ctx.send(embed=embed)
+def update_encouragements(encouraging_message):
+  if "encouragements" in db.keys():
+    encouragements = db["encouragements"]
+    encouragements.append(encouraging_message)
+    db["encouragements"] = encouragements
+  else:
+    db["encouragements"] = [encouraging_message]
 
-@bot.command()
-async def youtube(ctx, *, search):
-    query_string = parse.urlencode({'search_query': search})
-    html_content = request.urlopen('http://www.youtube.com/results?' + query_string)
-    # print(html_content.read().decode())
-    search_results = re.findall('href=\"\\/watch\\?v=(.{11})', html_content.read().decode())
-    print(search_results)
-    # I will put just the first result, you can loop the response to show more results
-    await ctx.send('https://www.youtube.com/watch?v=' + search_results[0])
+def delete_encouragment(index):
+  encouragements = db["encouragements"]
+  if len(encouragements) > index:
+    del encouragements[index]
+  db["encouragements"] = encouragements
 
-# Events
-@bot.event
+@client.event
 async def on_ready():
-    await bot.change_presence(activity=discord.Streaming(name="Tutorials", url="http://www.twitch.tv/accountname"))
-    print('My Ready is Body')
+  print("We have logged in as {0.user}".format(client))
 
-
-@bot.listen()
+@client.event
 async def on_message(message):
-    if "tutorial" in message.content.lower():
-        # in this case don't respond with the word "Tutorial" or you will call the on_message event recursively
-        await message.channel.send('This is that you want http://youtube.com/fazttech')
-        await bot.process_commands(message)
+  if message.author == client.user:
+    return
 
-bot.run('bot token')
+  msg = message.content
+
+  if msg.startswith("$inspire"):
+    quote = get_quote()
+    await message.channel.send(quote)
+
+  if db["responding"]:
+    options = starter_encouragements
+    if "encouragements" in db.keys():
+      options = options + db["encouragements"]
+
+    if any(word in msg for word in sad_words):
+      await message.channel.send(random.choice(options))
+
+  if msg.startswith("$new"):
+    encouraging_message = msg.split("$new ",1)[1]
+    update_encouragements(encouraging_message)
+    await message.channel.send("New encouraging message added.")
+
+  if msg.startswith("$del"):
+    encouragements = []
+    if "encouragements" in db.keys():
+      index = int(msg.split("$del",1)[1])
+      delete_encouragment(index)
+      encouragements = db["encouragements"]
+    await message.channel.send(encouragements)
+
+  if msg.startswith("$list"):
+    encouragements = []
+    if "encouragements" in db.keys():
+      encouragements = db["encouragements"]
+    await message.channel.send(encouragements)
+    
+  if msg.startswith("$responding"):
+    value = msg.split("$responding ",1)[1]
+
+    if value.lower() == "true":
+      db["responding"] = True
+      await message.channel.send("Responding is on.")
+    else:
+      db["responding"] = False
+      await message.channel.send("Responding is off.")
+
+keep_alive()
+client.run(os.getenv("TOKEN"))
